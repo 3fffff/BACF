@@ -15,7 +15,7 @@ struct  Params {
 	cv::Size model_sz = cv::Size(50, 50);
 	float target_padding = 2.0;
 	//learning parameters
-	float update_rate = 0.003;
+	float update_rate = 0.013;
 	float sigma_factor = 1.0 / 16.0;
 
 	//scale settings

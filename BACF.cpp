@@ -346,18 +346,16 @@ cv::Mat BACF::make_labels(const cv::Size matrix_size, const cv::Size target_size
 void BACF::compute_ADMM() {
 	std::vector<cv::Mat>l_f;
 	std::vector<cv::Mat>h_f;
+	cv::Mat	lp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
 	int mu = 1;
 	float T = (float)p.model_sz.area();
 	cv::Mat S_xx = channelMultiply(model_xf, model_xf, 0, true);
 	filterf.clear();
 	for (int i = 0; i < 3; i++)
 	{
-		cv::Mat	lp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
 		l_f.push_back(lp);
-		cv::Mat	hp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
-		h_f.push_back(hp);
-		cv::Mat	fp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
-		filterf.push_back(fp);
+		h_f.push_back(lp);
+		filterf.push_back(lp);
 	}
 	for (int i = 0; i < 2; i++)
 	{

@@ -1,2 +1,2 @@
 # BACF
-A port of implementation BACF to C++
+A port BACF to C++

@@ -366,15 +366,12 @@ void BACF::compute_ADMM() {
 		cv::Mat S_hx = channelMultiply(h_f, model_xf,0,true);
 		for (int j = 0; j<model_xf.size(); j++)
 		{
-			cv::Mat mlabelf, S_xxyf, mS_lx, mS_hx;
-			cv::multiply(labelsf, model_xf[j], mlabelf);
-			cv::multiply(S_xx, mlabelf, S_xxyf);
-			cv::multiply(S_lx, model_xf[j], mS_lx);
-			cv::multiply(S_hx, model_xf[j], mS_hx);
-			cv::Mat h;
-			cv::Mat ghj;
-			cv::divide(S_xxyf.mul(1 / (T*mu)) - mS_lx.mul(1 / mu) + mS_hx,B,ghj);
-			filterf[j] = ( mlabelf.mul(1/(T*mu)) -l_f[j].mul(1/mu)+ h_f[j]) - ghj;
+			cv::Mat mlabelf, S_xxyf, mS_lx, mS_hx,h;
+			cv::mulSpectrums(labelsf, model_xf[j], mlabelf,0,false);
+			cv::mulSpectrums(S_xx, mlabelf, S_xxyf,0,false);
+			cv::mulSpectrums(S_lx, model_xf[j], mS_lx,0,false);
+			cv::mulSpectrums(S_hx, model_xf[j], mS_hx,0,false);
+			filterf[j] = ( mlabelf.mul(1/(T*mu)) -l_f[j].mul(1/mu)+ h_f[j])-((S_xxyf.mul(1 / (T*mu)) - mS_lx.mul(1 / mu) + mS_hx)/B);
 			cv::dft((filterf[j].mul(mu) + l_f[j]), h, cv::DFT_INVERSE | cv::DFT_SCALE);
 			cv::Mat t = extractTrackedRegionSpec(h.mul(1/mu), p.model_sz);
 			cv::dft(t, h_f[j]);

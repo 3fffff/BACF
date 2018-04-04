@@ -1,4 +1,3 @@
-@@ -0,0 +1,578 @@
 #include <opencv2/core/utility.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
@@ -15,7 +14,7 @@ struct  Params {
 	cv::Size model_sz = cv::Size(50, 50);
 	float target_padding = 2.0;
 	//learning parameters
-	float update_rate = 0.013;
+	float update_rate = 0.003;
 	float sigma_factor = 1.0 / 16.0;
 
 	//scale settings
@@ -346,16 +345,18 @@ cv::Mat BACF::make_labels(const cv::Size matrix_size, const cv::Size target_size
 void BACF::compute_ADMM() {
 	std::vector<cv::Mat>l_f;
 	std::vector<cv::Mat>h_f;
-	cv::Mat	lp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
 	int mu = 1;
 	float T = (float)p.model_sz.area();
 	cv::Mat S_xx = channelMultiply(model_xf, model_xf, 0, true);
 	filterf.clear();
 	for (int i = 0; i < 3; i++)
 	{
+		cv::Mat	lp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
 		l_f.push_back(lp);
-		h_f.push_back(lp);
-		filterf.push_back(lp);
+		cv::Mat	hp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
+		h_f.push_back(hp);
+		cv::Mat	fp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
+		filterf.push_back(fp);
 	}
 	for (int i = 0; i < 2; i++)
 	{
@@ -364,12 +365,15 @@ void BACF::compute_ADMM() {
 		cv::Mat S_hx = channelMultiply(h_f, model_xf,0,true);
 		for (int j = 0; j<model_xf.size(); j++)
 		{
-			cv::Mat mlabelf, S_xxyf, mS_lx, mS_hx,h;
-			cv::mulSpectrums(labelsf, model_xf[j], mlabelf,0,false);
-			cv::mulSpectrums(S_xx, mlabelf, S_xxyf,0,false);
-			cv::mulSpectrums(S_lx, model_xf[j], mS_lx,0,false);
-			cv::mulSpectrums(S_hx, model_xf[j], mS_hx,0,false);
-			filterf[j] = ( mlabelf.mul(1/(T*mu)) -l_f[j].mul(1/mu)+ h_f[j])-((S_xxyf.mul(1 / (T*mu)) - mS_lx.mul(1 / mu) + mS_hx)/B);
+			cv::Mat mlabelf, S_xxyf, mS_lx, mS_hx;
+			cv::multiply(labelsf, model_xf[j], mlabelf);
+			cv::multiply(S_xx, mlabelf, S_xxyf);
+			cv::multiply(S_lx, model_xf[j], mS_lx);
+			cv::multiply(S_hx, model_xf[j], mS_hx);
+			cv::Mat h;
+			cv::Mat ghj;
+			cv::divide(S_xxyf.mul(1 / (T*mu)) - mS_lx.mul(1 / mu) + mS_hx,B,ghj);
+			filterf[j] = ( mlabelf.mul(1/(T*mu)) -l_f[j].mul(1/mu)+ h_f[j]) - ghj;
 			cv::dft((filterf[j].mul(mu) + l_f[j]), h, cv::DFT_INVERSE | cv::DFT_SCALE);
 			cv::Mat t = extractTrackedRegionSpec(h.mul(1/mu), p.model_sz);
 			cv::dft(t, h_f[j]);

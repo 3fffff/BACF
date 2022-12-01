@@ -351,12 +351,9 @@ void BACF::compute_ADMM() {
 	filterf.clear();
 	for (int i = 0; i < 3; i++)
 	{
-		cv::Mat	lp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
-		l_f.push_back(lp);
-		cv::Mat	hp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
-		h_f.push_back(hp);
-		cv::Mat	fp = cv::Mat::zeros(model_xf[0].size(), model_xf[0].type());
-		filterf.push_back(fp);
+		l_f.emplace_back(cv::Mat::zeros(model_xf[0].size(), model_xf[0].type()));
+		h_f.emplace_back(cv::Mat::zeros(model_xf[0].size(), model_xf[0].type()));
+		filterf.emplace_back(cv::Mat::zeros(model_xf[0].size(), model_xf[0].type()));
 	}
 	for (int i = 0; i < 2; i++)
 	{

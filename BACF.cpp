@@ -93,6 +93,7 @@ private:
 	void multiply(cv::Mat cn1, cv::Mat cn2, cv::Mat& result);
 	void divide(cv::Mat cn1, cv::Mat cn2, cv::Mat& result);
 	std::pair<int, int> minMaxLoc(cv::Mat array);
+	cv::Mat BACF::hann_window(int width, int height) const;
 	cv::Mat extractTrackedRegion(const cv::Mat image, const TrackedRegion region, const cv::Size output_sz);
 	cv::Mat extractTrackedRegionSpec(cv::Mat model, const cv::Size output_sz);
 	//parameters set on construction
@@ -136,7 +137,7 @@ void BACF::initialize(const cv::Mat& image, const cv::Rect region) {
 	labelsf = make_labels(p.model_sz, resized_target.size, p.sigma_factor);
 
 	//create window function
-	cv::createHanningWindow(window, p.model_sz, CV_32FC1);
+	window = hann_window(p.model_sz.width, p.model_sz.height);
 
 	//create the initial filter from the init patch
 	update_impl(image, target, 1.0);
@@ -184,6 +185,32 @@ std::pair<int, int> BACF::minMaxLoc(cv::Mat array)
 	return maxpos;
 }
 
+cv::Mat BACF::hann_window(int width,int height) const
+{
+	cv::Mat hann_window(width, height, CV_32F);
+	float* tvecx = new float[width + p.target_padding];
+	float* tvecy = new float[height + p.target_padding];
+	for (int i = 0; i < round((width + p.target_padding) / 2); i++)
+	{
+		float d = 2.0f * 3.14592653589793f * (float(i) / float(width + 1));
+		float hann = 0.5 - 0.5 * std::cos(d);
+		tvecx[i] = hann;
+		tvecx[width + 1 - i] = hann;
+	}
+	for (int i = 0; i < round((height + p.target_padding) / 2); i++)
+	{
+		float d = 2.0f * 3.14592653589793f * (float(i) / float(height + 1));
+		float hann = 0.5 - 0.5 * std::cos(d);
+		tvecy[i] = hann;
+		tvecy[height + 1 - i] = hann;
+	}
+	for (int x = 1; x < width + 1; x++)
+		for (int y = 1; y < height + 1; y++)
+			hann_window.at<float>(y - 1, x - 1) = tvecx[x] * tvecy[y];
+	delete[] tvecx;
+	delete[] tvecy;
+	return hann_window;
+}
 //private functions
 std::vector<cv::Mat> BACF::compute_feature_vec(const cv::Mat& patch) {
 

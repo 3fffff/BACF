@@ -4,6 +4,7 @@
 #include <opencv2/imgproc.hpp>
 #include <iostream>
 #include <cstring>
+#include <filesystem>
 
 using namespace cv;
 using namespace std;
@@ -39,8 +40,8 @@ struct TrackedRegion {
 	TrackedRegion resize(const float factor) const {
 		TrackedRegion newRegion;
 		newRegion.center = center;
-		newRegion.size = cv::Size(round(size.width *factor),
-			round(size.height*factor));
+		newRegion.size = cv::Size(round(size.width * factor),
+			round(size.height * factor));
 		return newRegion;
 	}
 
@@ -89,6 +90,9 @@ private:
 	void update_impl(const cv::Mat& image, const TrackedRegion& region, const float update_rate);
 	cv::Mat detect_impl(const cv::Mat& image, const TrackedRegion& region);
 	cv::Mat channelMultiply(std::vector<cv::Mat> a, std::vector<cv::Mat> b, int flags, bool conjb);
+	void multiply(cv::Mat cn1, cv::Mat cn2, cv::Mat& result);
+	void divide(cv::Mat cn1, cv::Mat cn2, cv::Mat& result);
+	std::pair<int, int> minMaxLoc(cv::Mat array);
 	cv::Mat extractTrackedRegion(const cv::Mat image, const TrackedRegion region, const cv::Size output_sz);
 	cv::Mat extractTrackedRegionSpec(cv::Mat model, const cv::Size output_sz);
 	//parameters set on construction
@@ -140,6 +144,44 @@ void BACF::initialize(const cv::Mat& image, const cv::Rect region) {
 
 void BACF::update(const cv::Mat& image) {
 	update_impl(image, target, 2);
+}
+
+void BACF::multiply(cv::Mat cn1, cv::Mat cn2, cv::Mat& result)
+{
+	result = cv::Mat::zeros(cn1.size(), cn1.type());
+
+	for (int x = 0; x < result.rows; x++)
+		for (int y = 0; y < result.cols; y++)
+			result.at<float>(x, y) = cn1.at<float>(x, y) * cn2.at<float>(x, y);
+}
+
+void BACF::divide(cv::Mat cn1, cv::Mat cn2, cv::Mat& result)
+{
+	result = cv::Mat::zeros(cn1.size(), cn1.type());
+
+	for (int x = 0; x < result.rows; x++)
+		for (int y = 0; y < result.cols; y++)
+			result.at<float>(x, y) = cn1.at<float>(x, y) / cn2.at<float>(x, y);
+}
+
+std::pair<int, int> BACF::minMaxLoc(cv::Mat array)
+{
+	float max = -999999.0f;
+	std::pair<int, int> maxpos;
+	for (int x = 0; x < p.model_sz.width; x++)
+	{
+		for (int y = 0; y < p.model_sz.height; y++)
+		{
+			float val = array.at<float>(y, x);
+			if (max < val)
+			{
+				max = val;
+				maxpos.first = x;
+				maxpos.second = y;
+			}
+		}
+	}
+	return maxpos;
 }
 
 //private functions
@@ -250,8 +292,8 @@ void BACF::update_impl(const cv::Mat& image, const TrackedRegion& region, const 
 		model_xf = feature_vecf;
 	}
 	else {
-		for (int i = 0; i<model_xf.size(); i++)
-			model_xf[i] = ((1 - p.update_rate)*model_xf[i]) + (p.update_rate* feature_vecf[i]);
+		for (int i = 0; i < model_xf.size(); i++)
+			model_xf[i] = ((1 - p.update_rate) * model_xf[i]) + (p.update_rate * feature_vecf[i]);
 	}
 
 	compute_ADMM();
@@ -275,12 +317,11 @@ void BACF::detect(const cv::Mat& image) {
 	cv::Mat response = detect_impl(image, target);
 	//	cout << response;
 
-	cv::Point2i maxpos;
 	//resp_newton
-	cv::minMaxLoc(response, NULL, NULL, NULL, &maxpos);
+	std::pair<int, int> maxpos = minMaxLoc(response);
 
-	cv::Point2i translation(round(shift_index(maxpos.x, response.cols)*scale_factor),
-		round(shift_index(maxpos.y, response.rows)*scale_factor));
+	cv::Point2i translation(round(shift_index(maxpos.first, response.cols) * scale_factor),
+		round(shift_index(maxpos.second, response.rows) * scale_factor));
 
 	target.center = target.center + translation;
 }
@@ -300,24 +341,16 @@ std::vector<cv::Mat> BACF::fft2(const cv::Mat featureData) {
 
 	for (size_t i = 0; i < channels.size(); ++i) {
 		cv::Mat windowed;
-		cv::multiply(channels[i], window, windowed);
-		cv::dft(windowed, channelsf[i], 0);
+		multiply(channels[i], window, windowed);
+		cv::dft(windowed, channelsf[i], cv::DFT_REAL_OUTPUT);
 	}
 
 	return channelsf;
 }
 
-int BACF::shift_index(const int index, const int length) const {
-	int shifted_index;
-
-	if (index > length / 2) {
-		shifted_index = -length + index;
-	}
-	else {
-		shifted_index = index;
-	}
-
-	return shifted_index;
+int BACF::shift_index(const int index, const int length) const
+{
+	return (index > length / 2) ? -length + index : index;
 }
 
 cv::Mat BACF::make_labels(const cv::Size matrix_size, const cv::Size target_size, const float sigma_factor) const {
@@ -330,14 +363,14 @@ cv::Mat BACF::make_labels(const cv::Size matrix_size, const cv::Size target_size
 		for (int y = 0; y < matrix_size.height; y++) {
 			int shift_x = shift_index(x, matrix_size.width);
 			int shift_y = shift_index(y, matrix_size.height);
-			float value = std::exp(constant*(std::pow(shift_x, 2) + std::pow(shift_y, 2)));
+			float value = std::exp(constant * (std::pow(shift_x, 2) + std::pow(shift_y, 2)));
 			new_labels.at<float>(y, x) = value;
 		}
 	}
 
 	cv::Mat labels_dft;
 
-	cv::dft(new_labels, labels_dft);
+	cv::dft(new_labels, labels_dft, cv::DFT_REAL_OUTPUT);
 
 	return labels_dft;
 }
@@ -357,23 +390,23 @@ void BACF::compute_ADMM() {
 	}
 	for (int i = 0; i < 2; i++)
 	{
-		cv::Mat B = S_xx + (T*mu);
-		cv::Mat S_lx = channelMultiply(l_f, model_xf,0,true);
-		cv::Mat S_hx = channelMultiply(h_f, model_xf,0,true);
-		for (int j = 0; j<model_xf.size(); j++)
+		cv::Mat B = S_xx + (T * mu);
+		cv::Mat S_lx = channelMultiply(l_f, model_xf, 0, true);
+		cv::Mat S_hx = channelMultiply(h_f, model_xf, 0, true);
+		for (int j = 0; j < model_xf.size(); j++)
 		{
 			cv::Mat mlabelf, S_xxyf, mS_lx, mS_hx;
-			cv::multiply(labelsf, model_xf[j], mlabelf);
-			cv::multiply(S_xx, mlabelf, S_xxyf);
-			cv::multiply(S_lx, model_xf[j], mS_lx);
-			cv::multiply(S_hx, model_xf[j], mS_hx);
+			multiply(labelsf, model_xf[j], mlabelf);
+			multiply(S_xx, mlabelf, S_xxyf);
+			multiply(S_lx, model_xf[j], mS_lx);
+			multiply(S_hx, model_xf[j], mS_hx);
 			cv::Mat h;
 			cv::Mat ghj;
-			cv::divide(S_xxyf.mul(1 / (T*mu)) - mS_lx.mul(1 / mu) + mS_hx,B,ghj);
-			filterf[j] = ( mlabelf.mul(1/(T*mu)) -l_f[j].mul(1/mu)+ h_f[j]) - ghj;
-			cv::dft((filterf[j].mul(mu) + l_f[j]), h, cv::DFT_INVERSE | cv::DFT_SCALE);
-			cv::Mat t = extractTrackedRegionSpec(h.mul(1/mu), p.model_sz);
-			cv::dft(t, h_f[j]);
+			divide(S_xxyf.mul(1 / (T * mu)) - mS_lx.mul(1 / mu) + mS_hx, B, ghj);
+			filterf[j] = (mlabelf.mul(1 / (T * mu)) - l_f[j].mul(1 / mu) + h_f[j]) - ghj;
+			cv::dft((filterf[j].mul(mu) + l_f[j]), h, cv::DFT_INVERSE | cv::DFT_SCALE| cv::DFT_REAL_OUTPUT);
+			cv::Mat t = extractTrackedRegionSpec(h.mul(1 / mu), p.model_sz);
+			cv::dft(t, h_f[j], cv::DFT_REAL_OUTPUT);
 			l_f[j] = l_f[j] + ((filterf[j].mul(mu) - h_f[j]));
 		}
 		mu = 10;
@@ -382,54 +415,53 @@ void BACF::compute_ADMM() {
 
 cv::Mat BACF::extractTrackedRegionSpec(cv::Mat model, const cv::Size output_sz)
 {
-	cv::Rect r(output_sz.width / 4, output_sz.height / 4, output_sz.width / 2, output_sz.height / 2);
-	TrackedRegion tr = r;
-	cv::Mat	lp1 = cv::Mat::zeros(model.size(), model.type());
-	cv::Mat	lp = extractTrackedRegion(model, tr, output_sz / 2);
-	lp.copyTo(lp1(r));
-	//std::cout << lp1;
-	return lp1;
+	cv::Mat lp = model.clone();
+	for (int x = 0; x < output_sz.width; x++)
+	{
+		for (int y = 0; y < output_sz.height; y++)
+		{
+			if ((x > ceil(output_sz.width) / 4 && x < ceil(output_sz.width / 4) + output_sz.width / 2) && (y > ceil(output_sz.height / 4) && y < ceil(output_sz.height / 4) + output_sz.height / 2))
+				lp.at<float>(y, x) = model.at<float>(y, x);
+			else
+				lp.at<float>(y, x) = 0;
+		}
+	}
+	return lp;
 }
 
-cv::Mat BACF::compute_response(const std::vector<cv::Mat>& filter, const std::vector<cv::Mat>& sample) {
+cv::Mat BACF::compute_response(const std::vector<cv::Mat>& filter, const std::vector<cv::Mat>& sample)
+{
 	cv::Mat response;
 
 	cv::Mat resp_dft = channelMultiply(filter, sample, 0, false);
-	cv::dft(resp_dft, response, cv::DFT_INVERSE|cv::DFT_SCALE);
-	//cout << response;
+	cv::dft(resp_dft, response, cv::DFT_INVERSE | cv::DFT_SCALE| cv::DFT_REAL_OUTPUT);
+	// cout << response;
 	return response;
 }
 
-class BoxExtractor {
+class BoxExtractor
+{
 public:
-	Rect2d extract(Mat img);
-	Rect2d extract(const std::string& windowName, Mat img, bool showCrossair = true);
+	cv::Rect2d extract(cv::Mat img);
+	cv::Rect2d extract(const std::string& windowName, cv::Mat img, bool showCrossair = true);
 
-	struct handlerT {
+	struct handlerT
+	{
 		bool isDrawing;
-		Rect2d box;
-		Mat image;
+		cv::Rect2d box;
+		cv::Mat image;
 
 		// initializer list
 		handlerT() : isDrawing(false) {};
-	}params;
+	} params;
 
 private:
-	static void mouseHandler(int event, int x, int y, int flags, void *param);
-	void opencv_mouse_callback(int event, int x, int y, int, void *param);
+	static void mouseHandler(int event, int x, int y, int flags, void* param);
+	void opencv_mouse_callback(int event, int x, int y, int, void* param);
 };
 
-int main(int argc, char** argv) {
-	// show help
-	if (argc<2) {
-  	cout <<
-			" Usage: example_tracking_kcf <video_name>\n"
-			" examples:\n"
-			" example_tracking_kcf Bolt/img/%04.jpg\n"
-			" example_tracking_kcf faceocc2.webm\n"
-			<< endl;
-		return 0;
-	}
+int main(int argc, char** argv)
+{
 
 	// ROI selector
 	BoxExtractor box;
@@ -437,28 +469,35 @@ int main(int argc, char** argv) {
 	// create the tracker
 
 	// set input video
-	std::string video = argv[1];
-	VideoCapture cap(video);
+	std::string video = "K:\\ReCFjs\\wakeboard7\\img\\";
+	// VideoCapture cap(video);
 
-	Mat frame;
+	cv::Mat frame = cv::imread(video + "000001.jpg");
+	if (frame.empty())
+	{
+		std::cout << "first frame is empty" << std::endl;
+		return 0;
+	}
 
 	// get bounding box
-	cap >> frame;
-	Rect2d roi = box.extract("tracker", frame);
+	// cap >> frame;
+	cv::Rect2d roi = cv::Rect2d(623, 299, 11, 38);
 
-	//quit if ROI was not selected
+	// quit if ROI was not selected
 	if (roi.width == 0 || roi.height == 0)
 		return 0;
 
-	BACF *tracker = new BACF();
+	BACF* tracker = new BACF();
 	tracker->initialize(frame, roi);
 
 	// do the tracking
 	printf("Start the tracking process, press ESC to quit.\n");
-	for (;; ) {
-		// get frame from the video
-		cap >> frame;
-
+	for (const auto& entry : std::filesystem::directory_iterator(video))
+	{
+		std::cout << entry.path() << std::endl;
+		frame = cv::imread(entry.path().string());
+		if (frame.empty())
+			break;
 		// stop the program if no more images
 		if (frame.rows == 0 || frame.cols == 0)
 			break;
@@ -467,47 +506,53 @@ int main(int argc, char** argv) {
 		tracker->updateImpl(frame, roi);
 
 		// draw the tracked object
-		rectangle(frame, roi, Scalar(255, 0, 0), 2, 1);
+		rectangle(frame, roi, cv::Scalar(255, 0, 0), 2, 1);
 
 		// show image with the tracked object
 		imshow("tracker", frame);
 
-		//quit on ESC button
-		if (waitKey(1) == 27)break;
+		// quit on ESC button
+		if (cv::waitKey(1) == 27)
+			break;
 	}
-
 }
 
-void BoxExtractor::mouseHandler(int event, int x, int y, int flags, void *param) {
-	BoxExtractor *self = static_cast<BoxExtractor*>(param);
+void BoxExtractor::mouseHandler(int event, int x, int y, int flags, void* param)
+{
+	BoxExtractor* self = static_cast<BoxExtractor*>(param);
 	self->opencv_mouse_callback(event, x, y, flags, param);
 }
 
-void BoxExtractor::opencv_mouse_callback(int event, int x, int y, int, void *param) {
-	handlerT * data = (handlerT*)param;
-	switch (event) {
+void BoxExtractor::opencv_mouse_callback(int event, int x, int y, int, void* param)
+{
+	handlerT* data = (handlerT*)param;
+	switch (event)
+	{
 		// update the selected bounding box
-	case EVENT_MOUSEMOVE:
-		if (data->isDrawing) {
+	case cv::EVENT_MOUSEMOVE:
+		if (data->isDrawing)
+		{
 			data->box.width = x - data->box.x;
 			data->box.height = y - data->box.y;
 		}
 		break;
 
 		// start to select the bounding box
-	case EVENT_LBUTTONDOWN:
+	case cv::EVENT_LBUTTONDOWN:
 		data->isDrawing = true;
-		data->box = cvRect(x, y, 0, 0);
+		data->box = cv::Rect(x, y, 0, 0);
 		break;
 
 		// cleaning up the selected bounding box
-	case EVENT_LBUTTONUP:
+	case cv::EVENT_LBUTTONUP:
 		data->isDrawing = false;
-		if (data->box.width < 0) {
+		if (data->box.width < 0)
+		{
 			data->box.x += data->box.width;
 			data->box.width *= -1;
 		}
-		if (data->box.height < 0) {
+		if (data->box.height < 0)
+		{
 			data->box.y += data->box.height;
 			data->box.height *= -1;
 		}
@@ -515,11 +560,13 @@ void BoxExtractor::opencv_mouse_callback(int event, int x, int y, int, void *par
 	}
 }
 
-Rect2d BoxExtractor::extract(Mat img) {
+cv::Rect2d BoxExtractor::extract(cv::Mat img)
+{
 	return extract("Bounding Box Extractor", img);
 }
 
-Rect2d BoxExtractor::extract(const std::string& windowName, Mat img, bool showCrossair) {
+cv::Rect2d BoxExtractor::extract(const std::string& windowName, cv::Mat img, bool showCrossair)
+{
 
 	int key = 0;
 
@@ -531,34 +578,33 @@ Rect2d BoxExtractor::extract(const std::string& windowName, Mat img, bool showCr
 	params.image = img.clone();
 
 	// select the object
-	setMouseCallback(windowName, mouseHandler, (void *)&params);
+	cv::setMouseCallback(windowName, mouseHandler, (void*)&params);
 
 	// end selection process on SPACE (32) BACKSPACE (27) or ENTER (13)
-	while (!(key == 32 || key == 27 || key == 13)) {
+	while (!(key == 32 || key == 27 || key == 13))
+	{
 		// draw the selected object
 		rectangle(
 			params.image,
 			params.box,
-			Scalar(255, 0, 0), 2, 1
-		);
+			cv::Scalar(255, 0, 0), 2, 1);
 
 		// draw cross air in the middle of bounding box
-		if (showCrossair) {
+		if (showCrossair)
+		{
 			// horizontal line
 			line(
 				params.image,
-				Point((int)params.box.x, (int)(params.box.y + params.box.height / 2)),
-				Point((int)(params.box.x + params.box.width), (int)(params.box.y + params.box.height / 2)),
-				Scalar(255, 0, 0), 2, 1
-			);
+				cv::Point((int)params.box.x, (int)(params.box.y + params.box.height / 2)),
+				cv::Point((int)(params.box.x + params.box.width), (int)(params.box.y + params.box.height / 2)),
+				cv::Scalar(255, 0, 0), 2, 1);
 
 			// vertical line
 			line(
 				params.image,
-				Point((int)(params.box.x + params.box.width / 2), (int)params.box.y),
-				Point((int)(params.box.x + params.box.width / 2), (int)(params.box.y + params.box.height)),
-				Scalar(255, 0, 0), 2, 1
-			);
+				cv::Point((int)(params.box.x + params.box.width / 2), (int)params.box.y),
+				cv::Point((int)(params.box.x + params.box.width / 2), (int)(params.box.y + params.box.height)),
+				cv::Scalar(255, 0, 0), 2, 1);
 		}
 
 		// show the image bouding box
@@ -567,8 +613,8 @@ Rect2d BoxExtractor::extract(const std::string& windowName, Mat img, bool showCr
 		// reset the image
 		params.image = img.clone();
 
-		//get keyboard event
-		key = waitKey(1);
+		// get keyboard event
+		key = cv::waitKey(1);
 	}
 
 	return params.box;

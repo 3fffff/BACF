@@ -90,7 +90,6 @@ private:
 	void update_impl(const cv::Mat& image, const TrackedRegion& region, const float update_rate);
 	cv::Mat detect_impl(const cv::Mat& image, const TrackedRegion& region);
 	cv::Mat channelMultiply(std::vector<cv::Mat> a, std::vector<cv::Mat> b, int flags, bool conjb);
-	void multiply(cv::Mat cn1, cv::Mat cn2, cv::Mat& result);
 	void divide(cv::Mat cn1, cv::Mat cn2, cv::Mat& result);
 	std::pair<int, int> minMaxLoc(cv::Mat array);
 	cv::Mat BACF::hann_window(int width, int height) const;
@@ -145,15 +144,6 @@ void BACF::initialize(const cv::Mat& image, const cv::Rect region) {
 
 void BACF::update(const cv::Mat& image) {
 	update_impl(image, target, 2);
-}
-
-void BACF::multiply(cv::Mat cn1, cv::Mat cn2, cv::Mat& result)
-{
-	result = cv::Mat::zeros(cn1.size(), cn1.type());
-
-	for (int x = 0; x < result.rows; x++)
-		for (int y = 0; y < result.cols; y++)
-			result.at<float>(x, y) = cn1.at<float>(x, y) * cn2.at<float>(x, y);
 }
 
 void BACF::divide(cv::Mat cn1, cv::Mat cn2, cv::Mat& result)
@@ -423,10 +413,10 @@ void BACF::compute_ADMM() {
 		for (int j = 0; j < model_xf.size(); j++)
 		{
 			cv::Mat mlabelf, S_xxyf, mS_lx, mS_hx;
-			multiply(labelsf, model_xf[j], mlabelf);
-			multiply(S_xx, mlabelf, S_xxyf);
-			multiply(S_lx, model_xf[j], mS_lx);
-			multiply(S_hx, model_xf[j], mS_hx);
+			cv::mulSpectrums(labelsf, model_xf[j], mlabelf);
+			cv::mulSpectrums(S_xx, mlabelf, S_xxyf);
+			cv::mulSpectrums(S_lx, model_xf[j], mS_lx);
+			cv::mulSpectrums(S_hx, model_xf[j], mS_hx);
 			cv::Mat h;
 			cv::Mat ghj;
 			divide(S_xxyf.mul(1 / (T * mu)) - mS_lx.mul(1 / mu) + mS_hx, B, ghj);
